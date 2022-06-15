@@ -1,34 +1,33 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
-from enum import Enum
-from functools import cache
+import logging
+from functools import cached_property
 from typing import Any
 from typing import cast
 from typing import NamedTuple
-from uuid import UUID
-from uuid import uuid4
 
 from notion_client import AsyncClient
 
 from notion_graph.config import config
 
+logger = logging.getLogger(__name__)
 
-def find_key(d: dict[str, Any], key: str) -> Any:
-    for k, v in d.items():
-        if k == key:
-            return v
-        if isinstance(v, dict):
-            found = find_key(v, key)
-            if found is not None:
-                return found
-        if isinstance(v, list):
-            for item in v:
-                found = find_key(item, key)
-                if found is not None:
-                    return found
-    return None
+NESTED_BLOCK_TYPES = [
+    'paragraph',
+    'bulleted_list_item',
+    'numbered_list_item',
+    'toggle',
+    'to_do',
+    'quote',
+    'callout',
+    'synced_block',
+    'template',
+    'column',
+    'child_page',
+    'child_database',
+    'table',
+]
 
 
 class Page(NamedTuple):
@@ -37,122 +36,156 @@ class Page(NamedTuple):
     title: str
 
 
-class RelationType(Enum):
-    CHILD_PAGE = 'child_page'
-    MENTION = 'mention'
-
-
 class Relation(NamedTuple):
     from_id: str
     to_id: str
-    type: RelationType
 
 
-async def parse_all(root: str) -> None:
-    client = get_client()
-    page_queue: deque[str] = deque([])
-    parsed_pages: set[str] = set()
-    page_queue.append(root)
-    pages: list[Page] = []
-    relations: list[Relation] = []
-
-    page_queue.append(root)
-
-    while page_queue:
-        page_id = page_queue.pop()
-        if page_id in parsed_pages:
-            continue
-        parsed_pages.add(page_id)
-        print(page_id)
-
-        resp = await client.pages.retrieve(page_id=page_id)
-        pages.append(parse_page(resp))
-
-        resp = await client.blocks.children.list(block_id=page_id)
-        new_rels = await parser_blocks(resp['results'], page_id)
-        for rel in new_rels:
-            if rel.to_id not in parsed_pages:
-                page_queue.append(rel.to_id)
-        relations.extend(new_rels)
-
-    from pprint import pprint
-
-    pprint(pages)
-    pprint(relations)
+class Block(NamedTuple):
+    id: str
+    page_id: str
+    is_page: bool = False
+    is_database: bool = False
 
 
-async def parser_blocks(blocks: list[dict[str, Any]], parent_id: str) -> list[Relation]:
-    rels: list[Relation] = []
-    for block in blocks:
-        rels.extend(await parse_relation(block, parent_id))
-    return rels
+class Parser:
+    _queue: asyncio.Queue[Block]
+    _parsed_block_ids: set[str]
+    _workers_done: list[bool]
+    _queue_lock: asyncio.Lock
 
+    pages: list[Page]
+    relations: list[Relation]
 
-def parse_mention(block_dict: dict[str, Any]) -> str | None:
-    mention = find_key(block_dict, 'mention')
-    if mention is None:
+    max_workers: int
+    root_page: str
+
+    def __init__(self, root_page: str, max_workers=32) -> None:
+        self.max_workers = max_workers
+        self.root_page = root_page
+
+        # mutable defaults
+        self._workers_done = [False] * self.max_workers
+        self._queue = asyncio.Queue()
+        self._queue_lock = asyncio.Lock()
+        self._parsed_block_ids = set()
+        self.pages = []
+        self.relations = []
+
+    async def parse(self) -> None:
+        # add initial block to queue
+        self._queue.put_nowait(
+            Block(id=self.root_page, is_page=True, page_id=self.root_page)
+        )
+
+        workers = [
+            asyncio.create_task(self.worker(worker_id=i))
+            for i in range(self.max_workers)
+        ]
+
+        await asyncio.gather(*workers)
+        await self._queue.join()
+
+    @cached_property
+    def client(self) -> AsyncClient:
+        return AsyncClient(auth=config.notion_key)
+
+    @classmethod
+    def find_key(cls, d: dict[str, Any], key: str) -> dict | None:
+        for k, v in d.items():
+            if k == key:
+                return cast(dict, v)
+            if isinstance(v, dict):
+                found = cls.find_key(v, key)
+                if found is not None:
+                    return found
+            if isinstance(v, list):
+                for item in v:
+                    found = cls.find_key(item, key)
+                    if found is not None:
+                        return found
         return None
-    if mention['type'] == 'page':
-        return cast(str, mention['page']['id'])
-    return None
 
+    async def worker(self, worker_id: int) -> None:
+        def _get_next_block_id() -> Block | None:
+            try:
+                block = self._queue.get_nowait()
+                if block.id in self._parsed_block_ids:
+                    self._queue.task_done()
+            except asyncio.QueueEmpty:
+                return None
+            else:
+                return block
 
-def parse_childpage(block_dict: dict[str, Any]) -> str | None:
-    if block_dict['type'] == 'child_page':
-        return cast(str, block_dict['id'])
-    return None
+        while True:
+            async with self._queue_lock:
+                block = _get_next_block_id()
+                if block is None:
+                    self._workers_done[worker_id] = True
+                    if all(self._workers_done):
+                        break
+                else:
+                    self._workers_done[worker_id] = False
+                    self._parsed_block_ids.add(block.id)
 
+            if block is not None:
+                await self.parse_block(block)
+                self._queue.task_done()
 
-async def parse_relation(block_dict: dict[str, Any], parent_id: str) -> list[Relation]:
-    rels: list[Relation] = []
+    async def parse_block(self, block: Block) -> None:
+        logger.warning(f'Parsing block {block!r}')
+        if block.is_page:
+            await self.parse_page(block.id)
+        await self.parse_children(block.id, block.page_id)
 
-    rel = parse_childpage(block_dict)
-    if rel is not None:
-        rels.append(
-            Relation(
-                from_id=parent_id,
-                to_id=rel,
-                type=RelationType.CHILD_PAGE,
-            )
+    async def parse_page(self, page_id: str) -> None:
+        print(page_id)
+        page_dict = await self.client.pages.retrieve(
+            page_id='f57d968575854d1ea35f21c7ac01e3f7'
         )
-    rel = parse_mention(block_dict)
-    if rel is not None:
-        rels.append(
-            Relation(
-                from_id=parent_id,
-                to_id=rel,
-                type=RelationType.MENTION,
-            )
-        )
+        print(2)
+        try:
+            title = page_dict['properties']['title']['title'][0]['text']['content']
+        except (KeyError, IndexError):
+            title = f'Page: {page_dict["id"]}'
 
-    if rels:
-        return rels
+        if page_dict['icon'] and page_dict['icon']['type'] == 'emoji':
+            title = f"{page_dict['icon']['emoji']} {title}"
 
-    if 'has_children' in block_dict and block_dict['has_children']:
-        resp = await get_client().blocks.children.list(block_id=block_dict['id'])
-        rels.extend(await parser_blocks(resp['results'], parent_id))
-    return rels
+        p = Page(id=page_id, url=page_dict['url'], title=title)
+        logger.warning(p)
+        self.pages.append(p)
 
+    async def parse_children(self, block_id: str, page_id: str) -> None:
+        children = await self.client.blocks.get_children(block_id=block_id)['results']
+        for child in children:
+            if not child['has_children']:
+                continue
 
-def parse_page(page_dict: dict[str, Any]) -> Page:
-    try:
-        title = page_dict['properties']['title']['title'][0]['text']['content']
-    except (KeyError, IndexError):
-        title = f'Page: {page_dict["id"]}'
+            if child['type'] == 'child_page':
+                id = child['id']
+                b = Block(id=id, is_page=True, page_id=id)
+            elif (v := self.find_key(child, 'mention')) is not None and v[
+                'type'
+            ] == 'page':
+                id = v['page']['id']
+                b = Block(id=id, is_page=True, page_id=id)
+            else:
+                b = Block(id=child['id'], page_id=page_id)
 
-    if page_dict['icon'] and page_dict['icon']['type'] == 'emoji':
-        title = f"{page_dict['icon']['emoji']} {title}"
+            if b.is_page:
+                r = Relation(from_id=page_id, to_id=b.id)
+                logger.warning(r)
+                self.relations.append(r)
 
-    return Page(id=page_dict['id'], url=page_dict['url'], title=title)
-
-
-@cache
-def get_client() -> AsyncClient:
-    return AsyncClient(auth=config.notion_key)
+            async with self._queue_lock:
+                if b.id not in self._parsed_block_ids:
+                    await self._queue.put(b)
 
 
 async def amain() -> None:
-    await parse_all('f57d968575854d1ea35f21c7ac01e3f7')
+    p = Parser(root_page='f57d968575854d1ea35f21c7ac01e3f7')
+    await p.parse()
 
 
 def main() -> None:
