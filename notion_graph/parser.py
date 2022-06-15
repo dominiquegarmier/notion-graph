@@ -60,7 +60,7 @@ class Parser:
     max_workers: int
     root_page: str
 
-    def __init__(self, root_page: str, max_workers=32) -> None:
+    def __init__(self, root_page: str, max_workers=1) -> None:
         self.max_workers = max_workers
         self.root_page = root_page
 
@@ -84,7 +84,6 @@ class Parser:
         ]
 
         await asyncio.gather(*workers)
-        await self._queue.join()
 
     @cached_property
     def client(self) -> AsyncClient:
@@ -110,8 +109,6 @@ class Parser:
         def _get_next_block_id() -> Block | None:
             try:
                 block = self._queue.get_nowait()
-                if block.id in self._parsed_block_ids:
-                    self._queue.task_done()
             except asyncio.QueueEmpty:
                 return None
             else:
@@ -130,20 +127,17 @@ class Parser:
 
             if block is not None:
                 await self.parse_block(block)
-                self._queue.task_done()
 
     async def parse_block(self, block: Block) -> None:
         logger.warning(f'Parsing block {block!r}')
         if block.is_page:
             await self.parse_page(block.id)
-        await self.parse_children(block.id, block.page_id)
+        await self.parse_children(block_id=block.id, page_id=block.page_id)
 
     async def parse_page(self, page_id: str) -> None:
-        print(page_id)
         page_dict = await self.client.pages.retrieve(
-            page_id='f57d968575854d1ea35f21c7ac01e3f7'
+            page_id=page_id,
         )
-        print(2)
         try:
             title = page_dict['properties']['title']['title'][0]['text']['content']
         except (KeyError, IndexError):
@@ -157,35 +151,42 @@ class Parser:
         self.pages.append(p)
 
     async def parse_children(self, block_id: str, page_id: str) -> None:
-        children = await self.client.blocks.get_children(block_id=block_id)['results']
+        children = (await self.client.blocks.children.list(block_id=block_id))[
+            'results'
+        ]
         for child in children:
-            if not child['has_children']:
-                continue
+            blocks: list[Block] = []
 
             if child['type'] == 'child_page':
                 id = child['id']
-                b = Block(id=id, is_page=True, page_id=id)
-            elif (v := self.find_key(child, 'mention')) is not None and v[
+                blocks.append(Block(id=id, is_page=True, page_id=id))
+
+            if (v := self.find_key(child, 'mention')) is not None and v[
                 'type'
             ] == 'page':
                 id = v['page']['id']
-                b = Block(id=id, is_page=True, page_id=id)
-            else:
-                b = Block(id=child['id'], page_id=page_id)
+                blocks.append(Block(id=id, is_page=True, page_id=id))
+            if child['has_children']:
+                blocks.append(Block(id=child['id'], page_id=page_id))
 
-            if b.is_page:
-                r = Relation(from_id=page_id, to_id=b.id)
-                logger.warning(r)
-                self.relations.append(r)
+            for block in blocks:
+                if block.is_page:
+                    r = Relation(from_id=page_id, to_id=block.id)
+                    logger.warning(r)
+                    self.relations.append(r)
 
-            async with self._queue_lock:
-                if b.id not in self._parsed_block_ids:
-                    await self._queue.put(b)
+                async with self._queue_lock:
+                    if block.id not in self._parsed_block_ids:
+                        await self._queue.put(block)
 
 
 async def amain() -> None:
     p = Parser(root_page='f57d968575854d1ea35f21c7ac01e3f7')
     await p.parse()
+    from pprint import pprint
+
+    pprint(p.pages)
+    pprint(p.relations)
 
 
 def main() -> None:

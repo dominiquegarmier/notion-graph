@@ -4,7 +4,6 @@ from notion_graph.parser import main as parser_main
 
 
 def main() -> int:
-    print('hello world')
     parser_main()
     return 0
 
