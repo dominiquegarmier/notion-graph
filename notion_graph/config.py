@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from functools import cache
+from pathlib import Path
 from typing import NamedTuple
 
 from dotenv import load_dotenv
@@ -15,6 +16,8 @@ __all__ = [
 
 class Config(NamedTuple):
     notion_key: str
+    max_parsing_time: int = 60
+    data_dir: Path = Path(__file__).parent / 'data'
 
 
 @cache
