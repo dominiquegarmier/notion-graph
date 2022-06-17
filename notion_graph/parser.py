@@ -61,8 +61,8 @@ class Parser:
     _workers_done: list[bool]
     _queue_lock: asyncio.Lock
 
-    pages: list[Page]
-    relations: list[Relation]
+    pages: set[Page]
+    relations: set[Relation]
 
     max_workers: int
     root_page: str
@@ -80,10 +80,10 @@ class Parser:
         self._queue = Queue()
         self._queue_lock = asyncio.Lock()
         self._parsed_block_ids = set()
-        self.pages = []
-        self.relations = []
+        self.pages = set()
+        self.relations = set()
 
-    async def parse(self) -> tuple[list[Page], list[Relation]]:
+    async def _parse(self) -> tuple[set[Page], set[Relation]]:
         try:
             await asyncio.wait_for(self._retry_parse(), timeout=config.max_parsing_time)
         except asyncio.TimeoutError:
@@ -101,7 +101,7 @@ class Parser:
             else:
                 break
 
-    async def _parse(self) -> None:
+    async def parse(self) -> tuple[set[Page], set[Relation]]:
         t_start = time.monotonic()
         # add initial block to queue
         self._queue.put(Block(id=self.root_page, is_page=True, page_id=self.root_page))
@@ -114,6 +114,7 @@ class Parser:
         await asyncio.gather(*workers)
         t_end = time.monotonic()
         logger.info(f'parsing took {t_end - t_start} seconds')
+        return self.pages, self.relations
 
     @cached_property
     def client(self) -> AsyncClient:
@@ -168,21 +169,33 @@ class Parser:
             await self.parse_page(block.id)
         await self.parse_children(block_id=block.id, page_id=block.page_id)
 
+    @staticmethod
+    def _parse_title(page_dict: dict[str, Any]) -> str:
+        try:
+            icon = cast(str, page_dict['icon']['emoji'])
+        except KeyError:
+            icon = None
+
+        title: str | None = None
+        for _, prop in page_dict['properties'].items():
+            if prop['id'] == 'title':
+                try:
+                    title = cast(str, prop['title'][0]['text']['content'])
+                except (KeyError, IndexError):
+                    pass
+        if title is None:
+            title = cast(str, page_dict['id'])
+        if icon is not None:
+            title = f'{icon} {title}'
+        return title
+
     async def parse_page(self, page_id: str) -> None:
         page_dict = await self.client.pages.retrieve(
             page_id=page_id,
         )
-        try:
-            title = page_dict['properties']['title']['title'][0]['text']['content']
-        except (KeyError, IndexError):
-            title = f'Page: {page_dict["id"]}'
-
-        if page_dict['icon'] and page_dict['icon']['type'] == 'emoji':
-            title = f"{page_dict['icon']['emoji']} {title}"
-
-        p = Page(id=page_id, url=page_dict['url'], title=title)
+        p = Page(id=page_id, url=page_dict['url'], title=self._parse_title(page_dict))
         logger.debug(p)
-        self.pages.append(p)
+        self.pages.add(p)
 
     async def parse_children(self, block_id: str, page_id: str) -> None:
         children = (await self.client.blocks.children.list(block_id=block_id))[
@@ -190,24 +203,23 @@ class Parser:
         ]
         for child in children:
             blocks: list[Block] = []
-
             if child['type'] == 'child_page':
                 id = child['id']
                 blocks.append(Block(id=id, is_page=True, page_id=id))
 
-            if (v := self.find_key(child, 'mention')) is not None and v[
+            elif (v := self.find_key(child, 'mention')) is not None and v[
                 'type'
             ] == 'page':
                 id = v['page']['id']
                 blocks.append(Block(id=id, is_page=True, page_id=id))
-            if child['has_children']:
+            elif child['has_children']:
                 blocks.append(Block(id=child['id'], page_id=page_id))
 
             for block in blocks:
                 if block.is_page:
                     r = Relation(from_id=page_id, to_id=block.id)
                     logger.debug(r)
-                    self.relations.append(r)
+                    self.relations.add(r)
 
                 async with self._queue_lock:
                     if block.id not in self._parsed_block_ids:
@@ -222,7 +234,7 @@ def relation_to_dict(r: Relation) -> dict[str, str]:
     return {'source': r.from_id, 'target': r.to_id}
 
 
-def write_json(pages: list[Page], relations: list[Relation]) -> None:
+def write_json(pages: set[Page], relations: set[Relation]) -> None:
     obj = {
         'nodes': [page_to_dict(p) for p in pages],
         'links': [relation_to_dict(r) for r in relations],
@@ -234,11 +246,12 @@ def write_json(pages: list[Page], relations: list[Relation]) -> None:
     logger.info('wrote pages and relatios to data.json')
 
 
-async def amain() -> None:
-    p = Parser(root_page='e601695a3c6f43ba842ce586924b0fdd')
+async def parser_amain() -> int:
+    p = Parser(root_page=config.root_id)
     pages, relations = await p.parse()
     write_json(pages, relations)
+    return 0
 
 
-def main() -> None:
-    asyncio.run(amain())
+def parser_main() -> int:
+    return asyncio.run(parser_amain())
