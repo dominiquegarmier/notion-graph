@@ -6,7 +6,9 @@ opensource graph view of your notion pages, inspired by [Obsidian](https://obsid
 
 most of the parts including the notion parser and flask app to serve the webview work, for now you still have to manually pull and serve the files.
 
-![notion-graph preview](https://user-images.githubusercontent.com/42445422/174397159-4fcb4074-d1d2-4fd2-8b13-331a924f8aea.gif)
+<p align="center">
+  <img src="https://user-images.githubusercontent.com/42445422/174397159-4fcb4074-d1d2-4fd2-8b13-331a924f8aea.gif" alt="notion-graph preview" />
+</p>
 
 ## Development
 
