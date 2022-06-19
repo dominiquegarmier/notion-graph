@@ -24,7 +24,23 @@ from notion_client import AsyncClient
 from notion_graph.config import config
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(message)s')
+
+
+NESTED_BLOCK_TYPES = [
+    'paragraph',
+    'bulleted_list_item',
+    'numbered_list_item',
+    'toggle',
+    'to_do',
+    'quote',
+    'callout',
+    'synced_block',
+    'template',
+    'column',
+    'child_page',
+    'child_database',
+    'table',
+]
 
 
 P = ParamSpec('P')
@@ -76,25 +92,8 @@ class TaskQueue(asyncio.Queue[Task]):
         for task in tasks:
             task.cancel()
 
-    def add_task(self, task: Task) -> None:
+    def push(self, task: Task) -> None:
         self.put_nowait(task)
-
-
-NESTED_BLOCK_TYPES = [
-    'paragraph',
-    'bulleted_list_item',
-    'numbered_list_item',
-    'toggle',
-    'to_do',
-    'quote',
-    'callout',
-    'synced_block',
-    'template',
-    'column',
-    'child_page',
-    'child_database',
-    'table',
-]
 
 
 class Page(NamedTuple):
@@ -115,7 +114,53 @@ class Block(NamedTuple):
     is_database: bool = False
 
 
+class Graph:
+    pages: set[Page]
+    relations: set[Relation]
+
+
 class Parser:
+    task_queue = TaskQueue()
+    graph: Graph
+    parsed_blocks: set[str]
+    root_id: str
+
+    def __init__(self, root_id: str, num_workers: int = 16) -> None:
+
+        self.parsed_blocks = set()
+        self.graph = Graph()
+
+        self.task_queue.num_worker = num_workers
+
+    def parse(self) -> Graph:
+        task = Task(self.parse_page, page_id=self.root_id)
+        self.task_queue.push(task)
+
+        asyncio.run(self.task_queue())
+        return self.graph
+
+    @task(task_queue)
+    async def parse_page(self, page_id: str) -> None:
+        pass
+
+    @task(task_queue)
+    async def parse_database(self, database_id: str) -> None:
+        raise NotImplementedError()
+
+    @task(task_queue)
+    async def parse_block(self, block_id: str) -> None:
+        pass
+
+    @task(task_queue)
+    async def parse_children(self, block_id: str) -> None:
+        pass
+
+    @task(task_queue)
+    async def parse_block_relation(self, block_id: str) -> None:
+        pass
+
+
+class _Parser:
     _queue: Queue[Block]
     _parsed_block_ids: set[str]
     _workers_done: list[bool]
@@ -307,7 +352,7 @@ def write_json(pages: set[Page], relations: set[Relation]) -> None:
 
 
 async def parser_amain() -> int:
-    p = Parser(root_page=config.root_id)
+    p = _Parser(root_page=config.root_id)
     pages, relations = await p.parse()
     write_json(pages, relations)
     return 0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from typing import cast
 
 from notion_graph.parser import parser_main
@@ -8,6 +9,9 @@ from notion_graph.server import server_main
 
 
 def main() -> int:
+
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
+
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(required=True)
 
