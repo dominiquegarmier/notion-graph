@@ -6,12 +6,18 @@ import logging
 import os
 import queue
 import time
+from abc import ABC
+from abc import abstractmethod
 from functools import cached_property
-from pathlib import Path
+from functools import wraps
 from queue import Queue
 from typing import Any
+from typing import Awaitable
+from typing import Callable
 from typing import cast
+from typing import Generic
 from typing import NamedTuple
+from typing import ParamSpec
 
 from notion_client import AsyncClient
 
@@ -19,6 +25,60 @@ from notion_graph.config import config
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(message)s')
+
+
+P = ParamSpec('P')
+
+
+class Task(Generic[P]):
+    def __init__(
+        self, func: Callable[P, Awaitable[None]], /, *args: P.args, **kwargs: P.kwargs
+    ):
+        self.func = func
+        self.func_args = args
+        self.func_kwargs = kwargs
+
+    async def __call__(self) -> None:
+        await self.func(*self.func_args, **self.func_kwargs)
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}(id={self.id})'
+
+
+def task(tq: TaskQueue):
+    def dec(func: Callable[P, Awaitable[None]]) -> Callable[P, None]:
+        @wraps(func)
+        def inner(*args: P.args, **kwargs: P.kwargs) -> None:
+            task = Task(func, *args, **kwargs)
+            tq.put_nowait(task)
+            return None
+
+        return inner
+
+    return dec
+
+
+class TaskQueue(asyncio.Queue[Task]):
+    def __init__(self, num_worker: int = 16):
+        super().__init__()
+        self.num_worker = num_worker
+
+    async def __call__(self):
+        async def _worker(self):
+            while True:
+                task = await self.get()
+                await task()
+                self.task_done()
+
+        tasks = [asyncio.create_task(_worker()) for _ in range(self.num_worker)]
+        await self.join()
+
+        for task in tasks:
+            task.cancel()
+
+    def add_task(self, task: Task) -> None:
+        self.put_nowait(task)
+
 
 NESTED_BLOCK_TYPES = [
     'paragraph',
