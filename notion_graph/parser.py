@@ -16,6 +16,7 @@ from typing import Awaitable
 from typing import Callable
 from typing import cast
 from typing import Generic
+from typing import Literal
 from typing import NamedTuple
 from typing import ParamSpec
 from typing import Protocol
@@ -79,19 +80,35 @@ def task(func: Callable[..., Awaitable[None]]) -> Callable[..., None]:
 
 
 class TaskQueue(asyncio.Queue[Task]):
-    done: bool = False
+    done: asyncio.Event
 
     def __init__(self, num_worker: int = 16):
         super().__init__()
         self.num_worker = num_worker
+        self.done = asyncio.Event()
 
     async def __call__(self) -> None:
+        signal = object()
+
+        async def _sig() -> object:
+            await self.done.wait()
+            return signal
+
         async def _worker() -> None:
             while True:
-                if self.done:
-                    return None
+                task: None | Task = None
                 try:
-                    task = await asyncio.wait_for(self.get(), timeout=0.1)
+                    ts, pending = await asyncio.wait(
+                        [self.get(), _sig()], return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for p in pending:
+                        p.cancel()
+                    t = ts.pop().result()
+                    if t is signal:
+                        return None
+                    else:
+                        task = cast(Task, t)
+
                 except asyncio.TimeoutError:
                     continue
                 try:
@@ -104,7 +121,7 @@ class TaskQueue(asyncio.Queue[Task]):
 
         tasks = [asyncio.create_task(_worker()) for _ in range(self.num_worker)]
         await self.join()
-        self.done = True
+        self.done.set()
         await asyncio.gather(*tasks)
 
     def push(self, task: Task) -> None:
