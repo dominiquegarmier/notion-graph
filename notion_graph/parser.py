@@ -18,6 +18,8 @@ from typing import cast
 from typing import Generic
 from typing import NamedTuple
 from typing import ParamSpec
+from typing import Protocol
+from typing import TypeVar
 
 from notion_client import AsyncClient
 
@@ -43,54 +45,67 @@ NESTED_BLOCK_TYPES = [
 ]
 
 
-P = ParamSpec('P')
-
-
-class Task(Generic[P]):
+class Task:
     def __init__(
-        self, func: Callable[P, Awaitable[None]], /, *args: P.args, **kwargs: P.kwargs
+        self,
+        func: Callable[..., Awaitable[None]],
+        _self: Parser,
+        /,
+        *args: Any,
+        **kwargs: Any,
     ):
-        self.func = func
+        self._func = func
+        self._self = _self
         self.func_args = args
         self.func_kwargs = kwargs
 
     async def __call__(self) -> None:
-        await self.func(*self.func_args, **self.func_kwargs)
+        _func = self._func
+        await _func(self._self, *self.func_args, **self.func_kwargs)
+        return None
 
     def __repr__(self):
-        return f'{self.__class__.__name__}(id={self.id})'
+        return f'{self.__class__.__name__}(func={self._func}, _self={self._self})'
 
 
-def task(tq: TaskQueue):
-    def dec(func: Callable[P, Awaitable[None]]) -> Callable[P, None]:
-        @wraps(func)
-        def inner(*args: P.args, **kwargs: P.kwargs) -> None:
-            task = Task(func, *args, **kwargs)
-            tq.put_nowait(task)
-            return None
+def task(func: Callable[..., Awaitable[None]]) -> Callable[..., None]:
+    @wraps(func)
+    def inner(_self: Parser, *args: Any, **kwargs: Any) -> None:
+        task = Task(func, _self, *args, **kwargs)
+        _self.task_queue.put_nowait(task)
+        return None
 
-        return inner
-
-    return dec
+    return inner
 
 
 class TaskQueue(asyncio.Queue[Task]):
+    done: bool = False
+
     def __init__(self, num_worker: int = 16):
         super().__init__()
         self.num_worker = num_worker
 
-    async def __call__(self):
-        async def _worker(self):
+    async def __call__(self) -> None:
+        async def _worker() -> None:
             while True:
-                task = await self.get()
-                await task()
-                self.task_done()
+                if self.done:
+                    return None
+                try:
+                    task = await asyncio.wait_for(self.get(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    continue
+                try:
+                    await task()
+                except Exception:
+                    logger.warning(f'task failed: {task}')
+                    raise  # should we raise or not?
+                finally:
+                    self.task_done()
 
         tasks = [asyncio.create_task(_worker()) for _ in range(self.num_worker)]
         await self.join()
-
-        for task in tasks:
-            task.cancel()
+        self.done = True
+        await asyncio.gather(*tasks)
 
     def push(self, task: Task) -> None:
         self.put_nowait(task)
@@ -123,7 +138,9 @@ class Parser:
     task_queue = TaskQueue()
     graph: Graph
     parsed_blocks: set[str]
+
     root_id: str
+    max_workers: int
 
     def __init__(self, root_id: str, num_workers: int = 16) -> None:
 
@@ -131,232 +148,36 @@ class Parser:
         self.graph = Graph()
 
         self.task_queue.num_worker = num_workers
+        self.root_id = root_id
 
     def parse(self) -> Graph:
-        task = Task(self.parse_page, page_id=self.root_id)
-        self.task_queue.push(task)
-
+        self.parse_page(page_id=self.root_id)
         asyncio.run(self.task_queue())
         return self.graph
 
-    @task(task_queue)
+    @task
     async def parse_page(self, page_id: str) -> None:
-        pass
+        raise NotImplementedError()
 
-    @task(task_queue)
+    @task
     async def parse_database(self, database_id: str) -> None:
         raise NotImplementedError()
 
-    @task(task_queue)
+    @task
     async def parse_block(self, block_id: str) -> None:
-        pass
+        raise NotImplementedError()
 
-    @task(task_queue)
-    async def parse_children(self, block_id: str) -> None:
-        pass
+    @task
+    async def parse_children(self, block_id: str = '') -> None:
+        raise NotImplementedError()
 
-    @task(task_queue)
+    @task
     async def parse_block_relation(self, block_id: str) -> None:
-        pass
-
-
-class _Parser:
-    _queue: Queue[Block]
-    _parsed_block_ids: set[str]
-    _workers_done: list[bool]
-    _queue_lock: asyncio.Lock
-
-    pages: set[Page]
-    relations: set[Relation]
-
-    max_workers: int
-    root_page: str
-    queue_timeout: float
-
-    def __init__(
-        self, root_page: str, max_workers: int = 8, queue_timeout: float = 0.001
-    ) -> None:
-        self.max_workers = max_workers
-        self.root_page = root_page
-        self.queue_timeout = queue_timeout
-
-        # mutable defaults
-        self._workers_done = [False] * self.max_workers
-        self._queue = Queue()
-        self._queue_lock = asyncio.Lock()
-        self._parsed_block_ids = set()
-        self.pages = set()
-        self.relations = set()
-
-    async def _parse(self) -> tuple[set[Page], set[Relation]]:
-        try:
-            await asyncio.wait_for(self._retry_parse(), timeout=config.max_parsing_time)
-        except asyncio.TimeoutError:
-            logger.error(
-                f'parsing took too long, stopped after {config.max_parsing_time:.2f}s'
-            )
-        return self.pages, self.relations
-
-    async def _retry_parse(self) -> None:
-        while True:
-            try:
-                await self._parse()
-            except Exception:
-                pass
-            else:
-                break
-
-    async def parse(self) -> tuple[set[Page], set[Relation]]:
-        t_start = time.monotonic()
-        # add initial block to queue
-        self._queue.put(Block(id=self.root_page, is_page=True, page_id=self.root_page))
-
-        workers = [
-            asyncio.create_task(self.worker(worker_id=i))
-            for i in range(self.max_workers)
-        ]
-
-        await asyncio.gather(*workers)
-        t_end = time.monotonic()
-        logger.info(f'parsing took {t_end - t_start} seconds')
-        return self.pages, self.relations
-
-    @cached_property
-    def client(self) -> AsyncClient:
-        return AsyncClient(auth=config.notion_key)
-
-    @classmethod
-    def find_key(cls, d: dict[str, Any], key: str) -> dict | None:
-        for k, v in d.items():
-            if k == key:
-                return cast(dict, v)
-            if isinstance(v, dict):
-                found = cls.find_key(v, key)
-                if found is not None:
-                    return found
-            if isinstance(v, list):
-                for item in v:
-                    found = cls.find_key(item, key)
-                    if found is not None:
-                        return found
-        return None
-
-    async def worker(self, worker_id: int) -> None:
-        def _get_next_block_id() -> Block | None:
-            try:
-                block = self._queue.get(block=False)
-            except queue.Empty:
-                return None
-            else:
-                return block
-
-        while True:
-            try:
-                timeout = asyncio.sleep(self.queue_timeout)  # type: ignore
-                async with self._queue_lock:
-                    block = _get_next_block_id()
-                    if block is None:
-                        self._workers_done[worker_id] = True
-                        if all(self._workers_done):
-                            break
-                    else:
-                        self._workers_done[worker_id] = False
-                        self._parsed_block_ids.add(block.id)
-
-                if block is not None:
-                    await self.parse_block(block)
-            finally:
-                await timeout
-
-    async def parse_block(self, block: Block) -> None:
-        logger.debug(f'Parsing block {block!r}')
-        if block.is_page:
-            await self.parse_page(block.id)
-        await self.parse_children(block_id=block.id, page_id=block.page_id)
-
-    @staticmethod
-    def _parse_title(page_dict: dict[str, Any]) -> str:
-        try:
-            icon = cast(str, page_dict['icon']['emoji'])
-        except KeyError:
-            icon = None
-
-        title: str | None = None
-        for _, prop in page_dict['properties'].items():
-            if prop['id'] == 'title':
-                try:
-                    title = cast(str, prop['title'][0]['text']['content'])
-                except (KeyError, IndexError):
-                    pass
-        if title is None:
-            title = cast(str, page_dict['id'])
-        if icon is not None:
-            title = f'{icon} {title}'
-        return title
-
-    async def parse_page(self, page_id: str) -> None:
-        page_dict = await self.client.pages.retrieve(
-            page_id=page_id,
-        )
-        p = Page(id=page_id, url=page_dict['url'], title=self._parse_title(page_dict))
-        logger.debug(p)
-        self.pages.add(p)
-
-    async def parse_children(self, block_id: str, page_id: str) -> None:
-        children = (await self.client.blocks.children.list(block_id=block_id))[
-            'results'
-        ]
-        for child in children:
-            blocks: list[Block] = []
-            if child['type'] == 'child_page':
-                id = child['id']
-                blocks.append(Block(id=id, is_page=True, page_id=id))
-
-            elif (v := self.find_key(child, 'mention')) is not None and v[
-                'type'
-            ] == 'page':
-                id = v['page']['id']
-                blocks.append(Block(id=id, is_page=True, page_id=id))
-            elif child['has_children']:
-                blocks.append(Block(id=child['id'], page_id=page_id))
-
-            for block in blocks:
-                if block.is_page:
-                    r = Relation(from_id=page_id, to_id=block.id)
-                    logger.debug(r)
-                    self.relations.add(r)
-
-                async with self._queue_lock:
-                    if block.id not in self._parsed_block_ids:
-                        self._queue.put(block)
-
-
-def page_to_dict(p: Page) -> dict[str, str]:
-    return {'id': p.id, 'group': p.id, 'title': p.title, 'url': p.url}
-
-
-def relation_to_dict(r: Relation) -> dict[str, str]:
-    return {'source': r.from_id, 'target': r.to_id}
-
-
-def write_json(pages: set[Page], relations: set[Relation]) -> None:
-    obj = {
-        'nodes': [page_to_dict(p) for p in pages],
-        'links': [relation_to_dict(r) for r in relations],
-    }
-
-    config.data_dir.mkdir(parents=True, exist_ok=True)
-    with open(config.data_dir / 'data.json', 'w') as f:
-        f.write(json.dumps(obj, indent=2))
-    logger.info('wrote pages and relatios to data.json')
-
-
-async def parser_amain() -> int:
-    p = _Parser(root_page=config.root_id)
-    pages, relations = await p.parse()
-    write_json(pages, relations)
-    return 0
+        raise NotImplementedError()
 
 
 def parser_main() -> int:
-    return asyncio.run(parser_amain())
+    parser = Parser(root_id=config.root_id)
+    graph = parser.parse()
+    print(graph)
+    return 0
