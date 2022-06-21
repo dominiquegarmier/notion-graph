@@ -144,26 +144,13 @@ class Graph:
                 }
             )
 
-        curvature_links: dict[str, list[Relation]] = defaultdict(lambda: [])
         for relation in self.relations:
-            id_1, id_2 = sorted([str(relation.from_page), str(relation.to_page)])
-            comp_id = f'{id_1}-{id_2}'
-            curvature_links.setdefault(comp_id, []).append(relation)
-
-        for relations in curvature_links.values():
-            num = len(relations)
-            for i, relation in enumerate(relations):
-                try:
-                    curvature = (i / (num - 1) - 0.5) * (1 / (1 + math.exp(-num)))
-                except ZeroDivisionError:
-                    curvature = 0
-                obj['links'].append(
-                    {
-                        'source': str(relation.from_page),
-                        'target': str(relation.to_page),
-                        'curvature': curvature,
-                    }
-                )
+            obj['links'].append(
+                {
+                    'source': str(relation.from_page),
+                    'target': str(relation.to_page),
+                }
+            )
         return json.dumps(obj, indent=2)
 
     def dump_json(self) -> None:
