@@ -66,7 +66,7 @@ python -m notion_graph run
 - [x] child pages
 - [x] linked pages
 - [ ] child databases (which are not linked elsewhere)
-- [ ] links to blocks
+- [x] links to blocks
 - [ ] blocks as nodes
 
 ### Frontend
