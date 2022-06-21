@@ -9,7 +9,7 @@ from notion_graph.client import get_page
 
 
 async def amain():
-    p = await get_children(block_id='453776be35854f74b098f7f6529ae33a')
+    p = await get_children(block_id='2465521b79364efba808e29cde228616')
     pprint(p)
 
 

@@ -10,7 +10,7 @@
 
       let selfLoopLinks = {};
       let sameNodesLinks = {};
-      const curvatureMinMax = 0.5;
+      const curvatureMinMax = 0.25;
 
       // 1. assign each link a nodePairId that combines their source and target independent of the links direction
       // 2. group links together that share the same two nodes or are self-loops
@@ -61,6 +61,7 @@
           .onNodeClick(node => window.open(`${node.url}`, '_blank'))
           .linkColor(() => 'rgba(255,255,255,0.2)')
           .linkCurvature('curvature')
+          .d3AlphaDecay(0.01)
           .graphData(gData);
         });
     </script>

@@ -7,6 +7,7 @@ import math
 import time
 from collections import defaultdict
 from functools import wraps
+from pprint import pprint
 from typing import Any
 from typing import Awaitable
 from typing import Callable
@@ -65,7 +66,7 @@ def task(
 class TaskQueue(asyncio.Queue[Task]):
     done: asyncio.Event
 
-    def __init__(self, num_worker: int = 16):
+    def __init__(self, num_worker: int = 64):
         super().__init__()
         self.num_worker = num_worker
         self.done = asyncio.Event()
@@ -163,6 +164,7 @@ class Parser:
     task_queue = TaskQueue()
     graph: Graph
     parsed_blocks: set[str]
+    parsed_blocks_lock = asyncio.Lock()
 
     root_id: str
     max_workers: int
@@ -187,11 +189,6 @@ class Parser:
 
     @task
     async def parse_page(self, page_id: str) -> None:
-        if page_id in self.parsed_blocks:
-            return
-        else:
-            self.parsed_blocks.add(page_id)
-
         def _parse_title(page_dict: dict[str, Any]) -> str:
             try:
                 icon = cast(str, page_dict['icon']['emoji'])
@@ -239,9 +236,17 @@ class Parser:
     async def parse_children(self, block_id: str, page_id: str) -> None:
         children = (await get_children(block_id=block_id))['results']
         for block_dict in children:
-            self._parse_block(block_dict=block_dict, block_id=block_id, page_id=page_id)
+            await self._parse_block(
+                block_dict=block_dict, block_id=block_dict['id'], page_id=page_id
+            )
 
-    def _parse_block(self, block_dict: dict, block_id: str, page_id: str) -> None:
+    async def _parse_block(self, block_dict: dict, block_id: str, page_id: str) -> None:
+        async with self.parsed_blocks_lock:
+            if block_id in self.parsed_blocks:
+                return
+            else:
+                self.parsed_blocks.add(block_id)
+
         def _get_relations(
             block_dict: dict, block_id: str, page_id: str
         ) -> list[Relation]:
@@ -286,11 +291,12 @@ class Parser:
             return
 
         elif block_dict['type'] == 'child_database':
+            # logger.warning('child_database not implemented')
             return
 
         else:
             if block_dict['has_children']:
-                self.parsed_blocks.add(block_id)
+                self.parse_children(block_id=block_id, page_id=page_id)
 
             relations = _get_relations(block_dict, block_id, page_id)
             for relation in relations:
