@@ -31,8 +31,8 @@ async def get_page(page_id: str) -> dict[str, Any]:
 
 
 async def get_children(block_id: str) -> dict[str, Any]:
-    return await _api_get(f'https://api.notion.com/v1/block/{block_id}/children')
+    return await _api_get(f'https://api.notion.com/v1/blocks/{block_id}/children')
 
 
 async def get_block(block_id: str) -> dict[str, Any]:
-    return await _api_get(f'https://api.notion.com/v1/block/{block_id}')
+    return await _api_get(f'https://api.notion.com/v1/blocks/{block_id}')

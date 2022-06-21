@@ -15,6 +15,7 @@
           .nodeLabel(node => `${node.title}`)
           .onNodeClick(node => window.open(`${node.url}`, '_blank'))
           .linkColor(() => 'rgba(255,255,255,0.2)')
+          .linkCurvature('curvature')
           .graphData(data);
         });
     </script>
