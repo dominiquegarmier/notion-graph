@@ -45,10 +45,10 @@ pre-commit install
 
 #### Parser
 
-First you will need to parse your Notion Notes, this will generate a file `notion_graph/data/data.json` containing then graph nodes and edges for the frontend to plot in the second step. For this run the command:
+First you will need to parse your Notion Notes, this will generate a file `api/data/data.json` containing then graph nodes and edges for the frontend to plot in the second step. For this run the command:
 
 ```
-python -m notion_graph parse
+python -m api parse
 ```
 
 #### Frontend
@@ -56,7 +56,7 @@ python -m notion_graph parse
 Once you have generated the `data.json` file using the parser you can serve a simple html file with flask using the command
 
 ```
-python -m notion_graph run
+python -m api run
 ```
 
 ## Features / Improvments

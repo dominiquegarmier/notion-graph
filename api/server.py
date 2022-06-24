@@ -6,7 +6,7 @@ from flask import Flask
 from flask import render_template
 from flask import send_file
 
-from notion_graph.config import config
+from api.config import config
 
 app = Flask(__name__)
 

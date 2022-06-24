@@ -18,10 +18,10 @@ from typing import NamedTuple
 from typing import ParamSpec
 from uuid import UUID
 
-from notion_graph.client import get_block
-from notion_graph.client import get_children
-from notion_graph.client import get_page
-from notion_graph.config import config
+from api.client import get_block
+from api.client import get_children
+from api.client import get_page
+from api.config import config
 
 logger = logging.getLogger(__name__)
 

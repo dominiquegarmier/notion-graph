@@ -6,7 +6,7 @@ from typing import cast
 
 from aiohttp import ClientSession
 
-from notion_graph.config import config
+from api.config import config
 
 
 @asynccontextmanager
