@@ -10,7 +10,20 @@
 
       let selfLoopLinks = {};
       let sameNodesLinks = {};
+      let nodeLinkCount = {};
       const curvatureMinMax = 0.25;
+
+      // node size
+      gData.links.forEach(link => {
+        nodeLinkCount[link.source] = nodeLinkCount[link.source] ? nodeLinkCount[link.source] + 1 : 1;
+        if (link.source !== link.target) {
+          nodeLinkCount[link.target] = nodeLinkCount[link.target] ? nodeLinkCount[link.target] + 1 : 1;
+        }
+      })
+
+      gData.nodes.forEach(node => {
+        node.linkCount = nodeLinkCount[node.id] ? nodeLinkCount[node.id] : 1;
+      })
 
       // 1. assign each link a nodePairId that combines their source and target independent of the links direction
       // 2. group links together that share the same two nodes or are self-loops
@@ -49,13 +62,16 @@
         }
       });
     }
+
+
     fetch('./data').then(res => res.json()).then(gData => {
       processData(gData);
 
       const elem = document.getElementById('graph');
       const Graph = ForceGraph()(elem)
       .backgroundColor('#101020')
-          .nodeRelSize(6)
+          .nodeRelSize(2)
+          .nodeVal(node => Math.sqrt(node.linkCount))
           .nodeAutoColorBy('group')
           .nodeLabel(node => `${node.title}`)
           .onNodeClick(node => window.open(`${node.url}`, '_blank'))
