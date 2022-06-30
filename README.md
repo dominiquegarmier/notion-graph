@@ -1,3 +1,5 @@
+[![pre-commit.ci status](https://results.pre-commit.ci/badge/github/DominiqueGarmier/notion-graph/main.svg)](https://results.pre-commit.ci/latest/github/DominiqueGarmier/notion-graph/main)
+
 # notion-graph
 
 opensource graph view of your notion pages, inspired by [Obsidian](https://obsidian.md/).
