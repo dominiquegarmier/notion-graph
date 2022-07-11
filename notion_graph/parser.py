@@ -6,11 +6,11 @@ import logging
 import math
 import time
 from collections import defaultdict
+from collections.abc import Awaitable
+from collections.abc import Callable
 from functools import wraps
 from pprint import pprint
 from typing import Any
-from collections.abc import Awaitable
-from collections.abc import Callable
 from typing import cast
 from typing import Concatenate
 from typing import Generic
