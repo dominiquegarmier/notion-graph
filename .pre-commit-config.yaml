@@ -13,12 +13,12 @@ repos:
     hooks:
       - id: flake8
   - repo: https://github.com/asottile/reorder_python_imports
-    rev: v3.8.2
+    rev: v3.8.3
     hooks:
       - id: reorder-python-imports
         args: [--py37-plus, --add-import, "from __future__ import annotations"]
   - repo: https://github.com/asottile/pyupgrade
-    rev: v2.37.3
+    rev: v2.38.2
     hooks:
       - id: pyupgrade
         args: [--py310-plus]
@@ -28,7 +28,7 @@ repos:
       - id: mypy
         additional_dependencies: ["types-PyYAML"]
   - repo: https://github.com/psf/black
-    rev: 22.6.0
+    rev: 22.8.0
     hooks:
       - id: black
         additional_dependencies: ["click==8.0.2"]
