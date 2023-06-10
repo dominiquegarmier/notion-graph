@@ -260,6 +260,7 @@ instance/
 .scrapy
 
 # Sphinx documentation
+types-python-dateutil
 docs/_build/
 
 # PyBuilder
@@ -376,3 +377,7 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/python,node,macos,linux,windows
+
+graph.json
+data.json
+data/
