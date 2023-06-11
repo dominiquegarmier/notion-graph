@@ -18,6 +18,7 @@ from datetime import datetime
 from datetime import timezone
 from logging import getLogger
 from pathlib import Path
+from threading import Thread
 from typing import Any
 from typing import Literal
 from typing import NoReturn
@@ -29,12 +30,12 @@ from aiolimiter import AsyncLimiter
 from dateutil.parser import parse as parse_date
 from dotenv import load_dotenv
 from flask import Flask
+from flask import jsonify
 from flask import render_template
-from flask import send_file
 from werkzeug import Response
 
 logger = getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 NOTION_URL = 'https://www.notion.so'
 NOTION_API_URL = 'https://api.notion.com/v1'
@@ -292,13 +293,6 @@ def to_display_graph(graph: Graph) -> DisplayGraph:
             links_list.append(new_link)
 
     return DisplayGraph(nodes=nodes, links=links_list)
-
-
-def dump_display_graph(disp_graph: DisplayGraph, path: str | Path) -> None:
-    fd, tmp_path = tempfile.mkstemp()
-    with open(fd, 'w') as f:
-        json.dump(dataclasses.asdict(disp_graph), f)
-    os.replace(tmp_path, path)
 
 
 @contextmanager
@@ -630,37 +624,42 @@ async def run_daemon(config: Config) -> NoReturn:
     while True:
         try:
             logger.info('refreshing graph...')
-            await partial_parse(config=config, flush=True)
+            await partial_parse(config=config, flush=False)
             await asyncio.sleep(config.refresh_interval)
         except Exception:
             logger.exception('error while parsing, retrying in 5s...')
             await asyncio.sleep(5)
 
 
-def run_flask(config: Config) -> None:
+def flask_app(config: Config) -> Flask:
     app = Flask(__name__)
 
     def index() -> Any:
         return render_template('index.html')
 
     def data() -> Response:
-        return send_file(config.data_path / 'graph.json')
+        with persisted_graph(config.data_path / 'graph.json') as graph:
+            display_graph = to_display_graph(graph)
+            return jsonify(dataclasses.asdict(display_graph))
 
     app.add_url_rule('/', view_func=index)
     app.add_url_rule('/data', view_func=data)
-    app.run(host='0.0.0.0', port=8080)
-
-
-async def amain() -> int:
-    config = load_config()
-    task = asyncio.create_task(run_daemon(config=config))
-    run_flask(config=config)
-    await task
-    return 0
+    return app
 
 
 def main() -> int:
-    return asyncio.run(amain())
+    config = load_config()
+    app = flask_app(config)
+
+    daemon = Thread(target=lambda: asyncio.run(run_daemon(config)))
+    flask = Thread(target=lambda: app.run(host='0.0.0.0', port=8080))
+
+    daemon.start()
+    flask.start()
+
+    daemon.join()
+    flask.join()
+    return 0
 
 
 if __name__ == '__main__':
