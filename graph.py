@@ -496,7 +496,6 @@ async def parse_children(
     children: list[UUID] = []
 
     for data in resp:
-
         # handle child_pages separately
         if data['type'] in 'child_page':
             links.append(
