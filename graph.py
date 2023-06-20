@@ -280,7 +280,11 @@ def to_display_graph(graph: Graph) -> DisplayGraph:
         links_dict[(link.source, link.target)].append(link)
 
     links_list = []
-    for links in links_dict.values():
+    for ids_tp, links in links_dict.items():
+        if ids_tp[0] == ids_tp[1]:
+            base_curvature = 0.5
+        else:
+            base_curvature = 0
         n = len(links)
         for i, link in enumerate(links):
             rotation = 2 * math.pi * i / n
@@ -288,7 +292,7 @@ def to_display_graph(graph: Graph) -> DisplayGraph:
                 source=str(link.source),
                 target=str(link.target),
                 rotation=rotation,
-                curvature=min((n - 1) / 10, 0.5),
+                curvature=base_curvature + min((n - 1) / 10, 0.5),
             )
             links_list.append(new_link)
 

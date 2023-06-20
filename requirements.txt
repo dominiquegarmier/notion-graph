@@ -1,3 +1,5 @@
 aiohttp
+aiolimiter
 flask
+python-dateutil
 python-dotenv
