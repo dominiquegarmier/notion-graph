@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v4.5.0
     hooks:
       - id: check-docstring-first
       - id: check-yaml
@@ -13,12 +13,12 @@ repos:
     hooks:
       - id: flake8
   - repo: https://github.com/asottile/reorder-python-imports
-    rev: v3.10.0
+    rev: v3.12.0
     hooks:
       - id: reorder-python-imports
         args: [--py37-plus, --add-import, "from __future__ import annotations"]
   - repo: https://github.com/asottile/pyupgrade
-    rev: v3.10.1
+    rev: v3.15.0
     hooks:
       - id: pyupgrade
         args: [--py310-plus]
@@ -28,7 +28,7 @@ repos:
       - id: mypy
         additional_dependencies: ["types-PyYAML", "types-python-dateutil"]
   - repo: https://github.com/psf/black
-    rev: 23.7.0
+    rev: 23.9.1
     hooks:
       - id: black
         additional_dependencies: ["click==8.0.2"]
