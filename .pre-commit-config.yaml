@@ -23,12 +23,12 @@ repos:
       - id: pyupgrade
         args: [--py310-plus]
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.6.0
+    rev: v1.6.1
     hooks:
       - id: mypy
         additional_dependencies: ["types-PyYAML", "types-python-dateutil"]
   - repo: https://github.com/psf/black
-    rev: 23.9.1
+    rev: 23.10.1
     hooks:
       - id: black
         additional_dependencies: ["click==8.0.2"]
