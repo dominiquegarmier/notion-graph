@@ -321,6 +321,8 @@ def persisted_graph(
             fd, tmp_path = tempfile.mkstemp()
             with open(fd, 'w') as f:
                 f.write(graph.serialize())
+
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
             os.replace(tmp_path, path)
 
 
@@ -496,7 +498,6 @@ async def parse_children(
     children: list[UUID] = []
 
     for data in resp:
-
         # handle child_pages separately
         if data['type'] in 'child_page':
             links.append(
