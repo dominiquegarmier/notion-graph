@@ -120,7 +120,7 @@ class Link:
     id: UUID
     source: UUID
     target: UUID
-    link_type: Literal['child', 'mention', 'href']
+    link_type: Literal['page', 'database', 'mention', 'href']
 
     def __hash__(self) -> int:
         return hash(self.id)
@@ -499,20 +499,24 @@ async def parse_children(
 
     for data in resp:
         # handle child_pages separately
-        if data['type'] in 'child_page':
+        tp = data['type']
+        target = data['id']
+        if tp == 'child_page':
+            links.append(Link(id=uuid4(), source=page, target=target, link_type='page'))
+        if tp == 'child_database':
             links.append(
-                Link(id=uuid4(), source=page, target=data['id'], link_type='child')
+                Link(id=uuid4(), source=page, target=target, link_type='database')
             )
 
         # handle any other links such as mentions and hrefs
         links.extend(parse_links(page=page, data=data))
 
         # handle propagation to children
-        if data['type'] in SKIP_PROPAGATION_BLOCK_TYPES:
+        if tp in SKIP_PROPAGATION_BLOCK_TYPES:
             continue
 
         if data.get('has_children'):
-            children.append(UUID(data['id']))
+            children.append(UUID(target))
 
     return children, links
 
