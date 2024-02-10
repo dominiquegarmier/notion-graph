@@ -30,7 +30,7 @@ Install dependencies.
 
 ```
 virtualenv .venv -ppython3.10
-source .venv activate
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
