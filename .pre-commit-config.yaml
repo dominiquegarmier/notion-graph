@@ -28,7 +28,7 @@ repos:
       - id: mypy
         additional_dependencies: ["types-PyYAML", "types-python-dateutil"]
   - repo: https://github.com/psf/black
-    rev: 24.1.1
+    rev: 24.2.0
     hooks:
       - id: black
         additional_dependencies: ["click==8.0.2"]
