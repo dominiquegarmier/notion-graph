@@ -34,20 +34,6 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Development
-
-Install dev-dependencies
-
-```
-pip install -r requirements-dev.txt
-```
-
-Install pre-commit hooks.
-
-```
-pre-commit install
-```
-
 ## Setup
 
 - set the environment variable `NOTION_KEY` with your notion api key that has read access to some pages (see [notion docs]("https://developers.notion.com/docs/create-a-notion-integration")).
@@ -63,3 +49,17 @@ python graph.py
 This will automatically discover any page shared with your notion integration. Subsequently it will create a task queue to query every discovered page. The initial parse of your document might take a while as notions api is limited to three requests per second. You will notice that the programm will create a new folder `data/` which contains the parsed pages and links. Subsequent parses will only refresh pages that have be edited since the last parse.
 
 The graph view will be served on `localhost:8080`. Make sure to hit refresh when the parsing is done.
+
+## Development
+
+Install dev-dependencies
+
+```
+pip install -r requirements-dev.txt
+```
+
+Install pre-commit hooks.
+
+```
+pre-commit install
+```
