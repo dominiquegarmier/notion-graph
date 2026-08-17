@@ -302,7 +302,7 @@ def to_display_graph(graph: Graph) -> DisplayGraph:
 @contextmanager
 def persisted_graph(
     path: str | Path, flush: bool = False, persist: bool = True
-) -> Generator[Graph, None, None]:
+) -> Generator[Graph]:
     if not flush:
         try:
             graph = Graph.load(path)
@@ -330,7 +330,7 @@ def persisted_graph(
 async def RateLimitedSession(
     config: Config,
     auth: str | None = None,
-) -> AsyncGenerator[ClientSession, None]:
+) -> AsyncGenerator[ClientSession]:
     auth = auth or config.notion_key
     headers = {
         'Authorization': f'Bearer {auth}',
